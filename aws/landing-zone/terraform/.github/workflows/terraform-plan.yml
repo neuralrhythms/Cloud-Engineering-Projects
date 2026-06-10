@@ -1,0 +1,152 @@
+name: Terraform Plan
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'layers/**'
+      - 'modules/**'
+      - 'policies/**'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.6.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      layers: ${{ steps.changes.outputs.layers }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            00-bootstrap:
+              - 'layers/00-bootstrap/**'
+              - 'modules/**'
+            01-organization:
+              - 'layers/01-organization/**'
+              - 'modules/organization/**'
+              - 'policies/**'
+            02-security:
+              - 'layers/02-security/**'
+              - 'modules/security-baseline/**'
+              - 'modules/guardduty/**'
+              - 'modules/securityhub/**'
+              - 'modules/config/**'
+            03-logging:
+              - 'layers/03-logging/**'
+              - 'modules/cloudtrail/**'
+            04-networking:
+              - 'layers/04-networking/**'
+              - 'modules/vpc/**'
+              - 'modules/transit-gateway/**'
+            05-identity:
+              - 'layers/05-identity/**'
+              - 'modules/iam-identity-center/**'
+            06-workloads:
+              - 'layers/06-workloads/**'
+              - 'modules/account-baseline/**'
+
+  plan:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        layer:
+          - 00-bootstrap
+          - 01-organization
+          - 02-security
+          - 03-logging
+          - 04-networking
+          - 05-identity
+          - 06-workloads
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: layers/${{ matrix.layer }}
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        working-directory: layers/${{ matrix.layer }}
+        run: terraform validate
+
+      - name: Terraform Format Check
+        working-directory: layers/${{ matrix.layer }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: layers/${{ matrix.layer }}
+        run: |
+          terraform plan -input=false -no-color -out=tfplan 2>&1 | tee plan_output.txt
+        continue-on-error: true
+
+      - name: Post Plan to PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync('layers/${{ matrix.layer }}/plan_output.txt', 'utf8');
+            const truncated = planOutput.length > 60000 
+              ? planOutput.substring(0, 60000) + '\n... (truncated)'
+              : planOutput;
+            
+            const body = `### Terraform Plan: \`${{ matrix.layer }}\`
+            
+            <details>
+            <summary>Show Plan Output</summary>
+            
+            \`\`\`
+            ${truncated}
+            \`\`\`
+            
+            </details>`;
+            
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Check Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          soft_fail: true
+
+      - name: Run checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: layers/
+          framework: terraform
+          soft_fail: true

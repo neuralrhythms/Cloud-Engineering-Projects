@@ -1,0 +1,55 @@
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'layers/**'
+      - 'modules/**'
+      - 'policies/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_VERSION: "1.6.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        layer:
+          - 00-bootstrap
+          - 01-organization
+          - 02-security
+          - 03-logging
+          - 04-networking
+          - 05-identity
+          - 06-workloads
+      max-parallel: 1  # Deploy layers sequentially
+      fail-fast: true
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: layers/${{ matrix.layer }}
+        run: terraform init -input=false
+
+      - name: Terraform Apply
+        working-directory: layers/${{ matrix.layer }}
+        run: terraform apply -input=false -auto-approve

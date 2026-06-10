@@ -1,0 +1,17 @@
+# Global owners
+* @platform-engineering-team
+
+# Security-sensitive changes require security team review
+/layers/01-organization/  @security-team @platform-engineering-team
+/layers/02-security/      @security-team @platform-engineering-team
+/layers/03-logging/       @security-team @platform-engineering-team
+/layers/05-identity/      @security-team @platform-engineering-team
+/policies/                @security-team @platform-engineering-team
+/modules/guardduty/       @security-team
+/modules/securityhub/     @security-team
+/modules/cloudtrail/      @security-team
+
+# Networking changes require network team review
+/layers/04-networking/    @network-team @platform-engineering-team
+/modules/vpc/             @network-team
+/modules/transit-gateway/ @network-team
