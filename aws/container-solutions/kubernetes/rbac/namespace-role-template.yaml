@@ -1,0 +1,48 @@
+# Template: Namespace-scoped Roles and RoleBindings
+# Usage: Apply per application namespace. Replace TEAM_NAME, ENVIRONMENT, ACCOUNT_ID.
+
+---
+# Full access within namespace for app developers
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-developer-binding
+  namespace: TEAM_NAME-ENVIRONMENT
+subjects:
+  - kind: Group
+    name: "arn:aws:iam::ACCOUNT_ID:role/TEAM_NAME-developer-role"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: edit
+  apiGroup: rbac.authorization.k8s.io
+---
+# Read-only access for team viewers
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-readonly-binding
+  namespace: TEAM_NAME-ENVIRONMENT
+subjects:
+  - kind: Group
+    name: "arn:aws:iam::ACCOUNT_ID:role/TEAM_NAME-readonly-role"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
+---
+# Jenkins deployer access for CI/CD pipeline
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-deployer-binding
+  namespace: TEAM_NAME-ENVIRONMENT
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-deploy
+    namespace: platform-system
+roleRef:
+  kind: ClusterRole
+  name: app-deployer
+  apiGroup: rbac.authorization.k8s.io

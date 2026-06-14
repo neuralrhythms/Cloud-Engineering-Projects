@@ -1,0 +1,89 @@
+// =============================================================================
+// Pipeline: Drift Detection
+// Purpose:  Detect infrastructure drift between Terraform state and AWS
+// Trigger:  Scheduled (daily at 06:00 UTC)
+// =============================================================================
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'terraform-agent'
+            defaultContainer 'terraform'
+        }
+    }
+
+    triggers {
+        cron('0 6 * * *')
+    }
+
+    stages {
+
+        stage('Check Drift — Dev') {
+            steps {
+                script {
+                    def exitCode = sh(
+                        script: '''
+                            cd terraform/environments/dev
+                            terraform init -backend-config=backend.hcl
+                            terraform plan -detailed-exitcode -var-file=terraform.tfvars
+                        ''',
+                        returnStatus: true
+                    )
+                    if (exitCode == 2) {
+                        echo "DRIFT DETECTED in dev environment"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+
+        stage('Check Drift — Test') {
+            steps {
+                script {
+                    def exitCode = sh(
+                        script: '''
+                            cd terraform/environments/test
+                            terraform init -backend-config=backend.hcl
+                            terraform plan -detailed-exitcode -var-file=terraform.tfvars
+                        ''',
+                        returnStatus: true
+                    )
+                    if (exitCode == 2) {
+                        echo "DRIFT DETECTED in test environment"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+
+        stage('Check Drift — Prod') {
+            steps {
+                script {
+                    def exitCode = sh(
+                        script: '''
+                            cd terraform/environments/prod
+                            terraform init -backend-config=backend.hcl
+                            terraform plan -detailed-exitcode -var-file=terraform.tfvars
+                        ''',
+                        returnStatus: true
+                    )
+                    if (exitCode == 2) {
+                        echo "DRIFT DETECTED in prod environment"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+
+    }
+
+    post {
+        unstable {
+            echo "Infrastructure drift detected. Notify platform team."
+            // TODO: Send SNS/Slack notification with drift details
+        }
+        success {
+            echo "No infrastructure drift detected across all environments."
+        }
+    }
+}

@@ -1,0 +1,106 @@
+// =============================================================================
+// Pipeline: Application Release
+// Purpose:  Package Helm chart and publish to chart repository (S3 / OCI ECR)
+// Trigger:  Tag push (e.g. v1.2.3) or called from build pipeline
+// =============================================================================
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'deploy-agent'
+            defaultContainer 'deploy'
+        }
+    }
+
+    parameters {
+        string(name: 'APP_NAME',    defaultValue: 'sample-app', description: 'Application / chart name')
+        string(name: 'CHART_VERSION', defaultValue: '',         description: 'Helm chart version (semver)')
+        string(name: 'APP_VERSION', defaultValue: '',           description: 'Application version (image tag)')
+    }
+
+    environment {
+        ECR_REGISTRY = 'REPLACE_WITH_ACCOUNT_ID.dkr.ecr.eu-west-1.amazonaws.com'
+        AWS_REGION   = 'eu-west-1'
+        CHART_PATH   = "helm/${params.APP_NAME}"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Lint Helm Chart') {
+            steps {
+                sh """
+                    helm lint ${env.CHART_PATH}
+                    helm lint ${env.CHART_PATH} \
+                      --values helm/environments/prod/${params.APP_NAME}.yaml
+                """
+            }
+        }
+
+        stage('Template Validation') {
+            steps {
+                sh """
+                    helm template ${params.APP_NAME} ${env.CHART_PATH} \
+                      --values helm/environments/prod/${params.APP_NAME}.yaml \
+                      | kubectl apply --dry-run=client -f -
+                """
+            }
+        }
+
+        stage('Update Chart Version') {
+            when {
+                expression { params.CHART_VERSION != '' }
+            }
+            steps {
+                sh """
+                    # Update Chart.yaml version and appVersion
+                    sed -i "s/^version:.*/version: ${params.CHART_VERSION}/" ${env.CHART_PATH}/Chart.yaml
+                    sed -i "s/^appVersion:.*/appVersion: \\"${params.APP_VERSION}\\"/" ${env.CHART_PATH}/Chart.yaml
+                """
+            }
+        }
+
+        stage('Package Helm Chart') {
+            steps {
+                sh "helm package ${env.CHART_PATH} --destination charts/"
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'charts/*.tgz', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Push Chart to ECR (OCI)') {
+            steps {
+                withCredentials([...]) {
+                    sh """
+                        aws ecr get-login-password --region ${env.AWS_REGION} | \
+                          helm registry login \
+                            --username AWS \
+                            --password-stdin \
+                            ${env.ECR_REGISTRY}
+
+                        helm push charts/${params.APP_NAME}-*.tgz \
+                          oci://${env.ECR_REGISTRY}/helm-charts
+                    """
+                }
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "Helm chart ${params.APP_NAME}:${params.CHART_VERSION} published to ECR."
+        }
+        failure {
+            echo "Helm chart release failed."
+        }
+    }
+}

@@ -1,0 +1,158 @@
+// =============================================================================
+// Pipeline: Application Deployment
+// Purpose:  Deploy application via Helm to EKS (dev → test → prod with approval)
+// Trigger:  Called from build pipeline or manually
+// =============================================================================
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'deploy-agent'
+            defaultContainer 'deploy'
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: deploy
+    image: REPLACE_WITH_ECR_URI/deploy-agent:latest
+    command: ['cat']
+    tty: true
+"""
+        }
+    }
+
+    parameters {
+        string(name: 'APP_NAME',      defaultValue: 'sample-app',  description: 'Application name')
+        string(name: 'IMAGE_TAG',     defaultValue: '',             description: 'Container image tag to deploy')
+        string(name: 'NAMESPACE',     defaultValue: 'default',      description: 'Kubernetes namespace')
+        string(name: 'CHART_PATH',    defaultValue: 'helm/sample-app', description: 'Path to Helm chart')
+    }
+
+    environment {
+        AWS_REGION = 'eu-west-1'
+    }
+
+    stages {
+
+        stage('Deploy to Dev') {
+            steps {
+                withCredentials([...]) {
+                    sh """
+                        aws eks update-kubeconfig \
+                          --name eks-platform-dev-eks \
+                          --region ${env.AWS_REGION}
+
+                        helm upgrade --install ${params.APP_NAME} ${params.CHART_PATH} \
+                          --namespace ${params.NAMESPACE}-dev \
+                          --create-namespace \
+                          --values ${params.CHART_PATH}/values.yaml \
+                          --values helm/environments/dev/${params.APP_NAME}.yaml \
+                          --set image.tag=${params.IMAGE_TAG} \
+                          --wait \
+                          --timeout 5m
+                    """
+                }
+            }
+            post {
+                failure {
+                    sh "helm rollback ${params.APP_NAME} --namespace ${params.NAMESPACE}-dev || true"
+                }
+            }
+        }
+
+        stage('Smoke Test — Dev') {
+            steps {
+                sh './scripts/smoke-test.sh dev ${params.APP_NAME}'
+            }
+        }
+
+        stage('Deploy to Test') {
+            steps {
+                withCredentials([...]) {
+                    sh """
+                        aws eks update-kubeconfig \
+                          --name eks-platform-test-eks \
+                          --region ${env.AWS_REGION}
+
+                        helm upgrade --install ${params.APP_NAME} ${params.CHART_PATH} \
+                          --namespace ${params.NAMESPACE}-test \
+                          --values ${params.CHART_PATH}/values.yaml \
+                          --values helm/environments/test/${params.APP_NAME}.yaml \
+                          --set image.tag=${params.IMAGE_TAG} \
+                          --wait \
+                          --timeout 5m
+                    """
+                }
+            }
+        }
+
+        stage('Smoke Test — Test') {
+            steps {
+                sh './scripts/smoke-test.sh test ${params.APP_NAME}'
+            }
+        }
+
+        stage('Helm Diff — Production Preview') {
+            steps {
+                withCredentials([...]) {
+                    sh """
+                        aws eks update-kubeconfig \
+                          --name eks-platform-prod-eks \
+                          --region ${env.AWS_REGION}
+
+                        helm diff upgrade ${params.APP_NAME} ${params.CHART_PATH} \
+                          --namespace ${params.NAMESPACE}-prod \
+                          --values ${params.CHART_PATH}/values.yaml \
+                          --values helm/environments/prod/${params.APP_NAME}.yaml \
+                          --set image.tag=${params.IMAGE_TAG} \
+                          --allow-unreleased
+                    """
+                }
+            }
+        }
+
+        stage('Approval — Production') {
+            steps {
+                input(
+                    message: "Deploy ${params.APP_NAME}:${params.IMAGE_TAG} to PRODUCTION?",
+                    submitter: 'app-team-leads,platform-leads'
+                )
+            }
+        }
+
+        stage('Deploy to Production') {
+            steps {
+                withCredentials([...]) {
+                    sh """
+                        helm upgrade --install ${params.APP_NAME} ${params.CHART_PATH} \
+                          --namespace ${params.NAMESPACE}-prod \
+                          --values ${params.CHART_PATH}/values.yaml \
+                          --values helm/environments/prod/${params.APP_NAME}.yaml \
+                          --set image.tag=${params.IMAGE_TAG} \
+                          --atomic \
+                          --timeout 10m \
+                          --cleanup-on-fail
+                    """
+                }
+            }
+        }
+
+        stage('Smoke Test — Production') {
+            steps {
+                sh './scripts/smoke-test.sh prod ${params.APP_NAME}'
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "Deployment of ${params.APP_NAME}:${params.IMAGE_TAG} to production complete."
+        }
+        failure {
+            echo "Deployment failed. Helm --atomic should have rolled back automatically."
+            // TODO: PagerDuty alert
+        }
+    }
+}

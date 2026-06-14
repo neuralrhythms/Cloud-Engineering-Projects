@@ -1,0 +1,28 @@
+# Allow inbound traffic from the AWS Load Balancer Controller
+# (traffic routed from the ALB to application pods)
+#
+# Apply this alongside default-deny-all in application namespaces.
+# Adjust the podSelector matchLabels to target your specific application.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-alb
+  # namespace: set at apply time
+spec:
+  podSelector:
+    matchLabels:
+      # Target: pods that serve HTTP traffic behind the ALB
+      # Replace with your application's label selector
+      app.kubernetes.io/name: REPLACE_WITH_APP_NAME
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Allow from kube-system namespace (ALB controller, proxies)
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 8080  # Replace with your application's container port

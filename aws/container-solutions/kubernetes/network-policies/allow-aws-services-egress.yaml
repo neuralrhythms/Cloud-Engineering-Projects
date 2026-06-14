@@ -1,0 +1,21 @@
+# Allow egress to AWS services via VPC Endpoints
+# Covers: ECR, Secrets Manager, CloudWatch, STS, S3
+#
+# With VPC Endpoints configured, traffic stays within the VPC.
+# This policy allows pods to reach VPC Endpoint IPs on HTTPS (443).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-aws-services-egress
+  # namespace: set at apply time
+spec:
+  podSelector: {}  # Apply to all pods in namespace
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 443
+      # VPC Endpoint traffic — all destinations within VPC CIDR
+      # Tighten to specific VPC Endpoint prefixes if required

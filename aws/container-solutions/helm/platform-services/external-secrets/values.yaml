@@ -1,0 +1,28 @@
+# External Secrets Operator — Helm values
+# Chart: external-secrets/external-secrets
+# Docs: https://external-secrets.io/latest/introduction/getting-started/
+
+installCRDs: true
+
+replicaCount: 2
+
+serviceAccount:
+  create: true
+  name: external-secrets
+  annotations:
+    eks.amazonaws.com/role-arn: "REPLACE_WITH_EXTERNAL_SECRETS_ROLE_ARN"
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+
+# -- After deploying, create a ClusterSecretStore pointing to AWS Secrets Manager.
+# See kubernetes/platform-components/cluster-secret-store.yaml

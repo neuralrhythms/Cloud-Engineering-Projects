@@ -1,0 +1,48 @@
+# Template: ALB Ingress for application workloads
+# Usage: Copy and customise per application. Deploy via Helm chart (preferred)
+#        or directly for platform-level ingress resources.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: REPLACE_WITH_APP_NAME
+  namespace: REPLACE_WITH_NAMESPACE
+  annotations:
+    # ALB scheme: internet-facing (external) or internal
+    alb.ingress.kubernetes.io/scheme: internet-facing
+
+    # Target type: ip (recommended for EKS; routes directly to pod IPs)
+    alb.ingress.kubernetes.io/target-type: ip
+
+    # HTTPS listener + redirect HTTP to HTTPS
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80,"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # ACM certificate ARN for TLS
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-west-1:ACCOUNT_ID:certificate/CERT_ID"
+
+    # Health check configuration
+    alb.ingress.kubernetes.io/healthcheck-path: /health/ready
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+
+    # Security group for the ALB (optional — ALB controller creates one by default)
+    # alb.ingress.kubernetes.io/security-groups: "sg-xxxx"
+
+    # WAF ACL (optional)
+    # alb.ingress.kubernetes.io/wafv2-acl-arn: "arn:aws:wafv2:..."
+
+spec:
+  ingressClassName: alb
+  rules:
+    - host: REPLACE_WITH_HOSTNAME
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: REPLACE_WITH_SERVICE_NAME
+                port:
+                  number: 80
