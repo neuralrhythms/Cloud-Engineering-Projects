@@ -43,8 +43,6 @@ Cloud-Engineering-Projects/
 ├── gcp/                          # Google Cloud Platform projects
 ├── terraform/                    # Multi-cloud IaC modules
 ├── architecture-patterns/        # Reusable architecture patterns
-├── runbooks/                     # Operational runbooks
-├── certifications/               # Cloud certification resources
 ├── diagrams/                     # Architecture diagrams (source files)
 └── assets/                       # Images, GIFs, media
 ```
@@ -189,19 +187,6 @@ Reusable, documented architecture patterns with decision matrices.
 
 ---
 
-## 🎓 Certifications
-
-| Certification | Status |
-|--------------|--------|
-| AWS Solutions Architect Professional | ✅ |
-| AWS Security Specialty | ✅ |
-| AWS Advanced Networking Specialty | ✅ |
-| HashiCorp Terraform Associate | ✅ |
-| Azure Solutions Architect Expert | 📋 Planned |
-| GCP Professional Cloud Architect | 📋 Planned |
-
----
-
 ## 🛠️ Technologies
 
 ![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazon-aws&logoColor=white)
@@ -215,9 +200,9 @@ Reusable, documented architecture patterns with decision matrices.
 
 ## 📬 Contact
 
-- **LinkedIn**: [Your LinkedIn Profile]
-- **Email**: [your.email@domain.com]
-- **Blog**: [Your Blog URL]
+- **LinkedIn**: [linkedin.com/in/rajib13](https://www.linkedin.com/in/rajib13)
+- **Interactive AI Learning Site**: [ai.neuralrhythms.in](https://ai.neuralrhythms.in)
+- **Personal Blog**: [neuralrhythms.in](https://www.neuralrhythms.in)
 
 ---
 
