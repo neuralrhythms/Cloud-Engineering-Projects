@@ -1,0 +1,163 @@
+// =============================================================================
+// Pipeline: Terraform CD
+// Purpose:  Infrastructure deployment — plan and apply (with approval for prod)
+// Trigger:  Merge to main branch
+// =============================================================================
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'terraform-agent'
+            defaultContainer 'terraform'
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: terraform
+    image: REPLACE_WITH_ECR_URI/terraform-agent:1.6
+    command: ['cat']
+    tty: true
+"""
+        }
+    }
+
+    options {
+        timeout(time: 60, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'test', 'prod'],
+            description: 'Target environment to deploy'
+        )
+        booleanParam(
+            name: 'DRY_RUN',
+            defaultValue: false,
+            description: 'Plan only — do not apply'
+        )
+    }
+
+    environment {
+        TF_DIR          = "terraform/environments/${params.ENVIRONMENT}"
+        AWS_DEFAULT_REGION = 'eu-west-1'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    currentBuild.description = "Env: ${params.ENVIRONMENT} | Commit: ${env.GIT_COMMIT_SHORT}"
+                }
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                dir(env.TF_DIR) {
+                    withCredentials([...]) { // TODO: Add AWS credentials binding
+                        sh 'terraform init -backend-config=backend.hcl'
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                dir(env.TF_DIR) {
+                    withCredentials([...]) {
+                        sh '''
+                            terraform plan \
+                              -var-file=terraform.tfvars \
+                              -out=tfplan \
+                              -detailed-exitcode | tee plan-output.txt
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${env.TF_DIR}/tfplan", allowEmptyArchive: true
+                    archiveArtifacts artifacts: "${env.TF_DIR}/plan-output.txt", allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Approval — Production') {
+            when {
+                allOf {
+                    expression { params.ENVIRONMENT == 'prod' }
+                    expression { !params.DRY_RUN }
+                }
+            }
+            steps {
+                script {
+                    def planSummary = readFile("${env.TF_DIR}/plan-output.txt")
+                    input(
+                        message: "Review Terraform plan for PRODUCTION. Approve to apply?",
+                        submitter: 'platform-leads',
+                        parameters: [
+                            text(name: 'PLAN_REVIEW', defaultValue: planSummary, description: 'Terraform Plan Output')
+                        ]
+                    )
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            when {
+                expression { !params.DRY_RUN }
+            }
+            steps {
+                dir(env.TF_DIR) {
+                    withCredentials([...]) {
+                        sh 'terraform apply tfplan'
+                    }
+                }
+            }
+        }
+
+        stage('Post-Apply Validation') {
+            when {
+                expression { !params.DRY_RUN }
+            }
+            steps {
+                withCredentials([...]) {
+                    sh '''
+                        # Verify cluster is active
+                        aws eks describe-cluster \
+                          --name ${PROJECT}-${ENVIRONMENT}-eks \
+                          --query "cluster.status" \
+                          --output text
+
+                        # Update kubeconfig
+                        aws eks update-kubeconfig \
+                          --name ${PROJECT}-${ENVIRONMENT}-eks \
+                          --region ${AWS_DEFAULT_REGION}
+
+                        # Verify nodes are ready
+                        kubectl wait --for=condition=Ready nodes --all --timeout=300s
+                    '''
+                }
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "Terraform apply completed successfully for ${params.ENVIRONMENT}."
+            // TODO: Send Slack notification
+        }
+        failure {
+            echo "Terraform apply failed for ${params.ENVIRONMENT}. Check logs."
+            // TODO: Send Slack/PagerDuty notification
+        }
+    }
+}

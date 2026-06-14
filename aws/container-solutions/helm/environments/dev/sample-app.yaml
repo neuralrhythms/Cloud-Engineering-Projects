@@ -1,0 +1,29 @@
+# Dev environment overrides for sample-app
+# Applied on top of helm/sample-app/values.yaml
+
+replicaCount: 1
+
+image:
+  tag: "latest"
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+ingress:
+  enabled: true
+  hosts:
+    - host: sample-app.dev.internal
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

@@ -1,0 +1,39 @@
+# AWS Load Balancer Controller — Helm values
+# Chart: eks/aws-load-balancer-controller
+# Docs: https://github.com/aws/eks-charts/tree/master/stable/aws-load-balancer-controller
+
+# -- EKS cluster name (required)
+clusterName: "REPLACE_WITH_CLUSTER_NAME"
+
+# -- Service account with IRSA annotation
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller
+  annotations:
+    eks.amazonaws.com/role-arn: "REPLACE_WITH_ALB_CONTROLLER_ROLE_ARN"
+
+# -- Replica count (2 for HA)
+replicaCount: 2
+
+# -- Resource limits
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+
+# -- Enable Shield (WAF) integration (optional)
+enableShield: false
+
+# -- Enable WAF integration (optional)
+enableWaf: false
+
+# -- Enable WAFv2 integration (optional)
+enableWafv2: false

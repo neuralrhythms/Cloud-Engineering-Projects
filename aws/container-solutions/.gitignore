@@ -1,0 +1,66 @@
+# =============================================================================
+# .gitignore — AWS EKS Platform
+# =============================================================================
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfplan
+*.tfstate
+*.tfstate.backup
+terraform.tfvars.local
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+crash.log
+crash.*.log
+
+# Terraform sensitive files — never commit these
+**/terraform.tfvars
+!**/terraform.tfvars.example
+
+# Helm
+*.tgz
+charts/
+
+# Kubernetes secrets — never commit
+**/secret.yaml
+**/secrets.yaml
+**/*-secret.yaml
+
+# AWS credentials — never commit
+.aws/
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python (for scripts)
+__pycache__/
+*.pyc
+.venv/
+
+# Build artefacts
+dist/
+build/
+*.zip
+
+# Logs
+*.log
+logs/
+
+# Test outputs
+test-results/
+coverage/
+trivy-report.json
+tfsec-report.xml
+checkov-report.xml

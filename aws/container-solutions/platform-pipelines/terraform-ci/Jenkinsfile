@@ -1,0 +1,128 @@
+// =============================================================================
+// Pipeline: Terraform CI
+// Purpose:  Pull Request validation — fmt, validate, security scan, plan
+// Trigger:  Pull Request opened or updated
+// =============================================================================
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'terraform-agent'
+            defaultContainer 'terraform'
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: terraform
+    image: REPLACE_WITH_ECR_URI/terraform-agent:1.6
+    command: ['cat']
+    tty: true
+"""
+        }
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'prod'], description: 'Target environment')
+    }
+
+    environment {
+        TF_DIR = "terraform/environments/${params.ENVIRONMENT}"
+        AWS_DEFAULT_REGION = 'eu-west-1'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    currentBuild.description = "Branch: ${env.BRANCH_NAME} | Commit: ${env.GIT_COMMIT_SHORT}"
+                }
+            }
+        }
+
+        stage('Terraform Format Check') {
+            steps {
+                sh 'terraform fmt -check -recursive terraform/'
+            }
+        }
+
+        stage('Terraform Validate') {
+            steps {
+                dir(env.TF_DIR) {
+                    sh '''
+                        terraform init -backend=false
+                        terraform validate
+                    '''
+                }
+            }
+        }
+
+        stage('Security Scan — tfsec') {
+            steps {
+                sh "tfsec ${env.TF_DIR} --format junit --out tfsec-report.xml"
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'tfsec-report.xml'
+                }
+            }
+        }
+
+        stage('Security Scan — checkov') {
+            steps {
+                sh """
+                    checkov -d ${env.TF_DIR} \
+                      --framework terraform \
+                      --output junitxml \
+                      --output-file checkov-report.xml \
+                      --soft-fail
+                """
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'checkov-report.xml'
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                dir(env.TF_DIR) {
+                    withCredentials([...]) { // TODO: Add AWS credentials binding
+                        sh '''
+                            terraform init -backend-config=backend.hcl
+                            terraform plan \
+                              -var-file=terraform.tfvars \
+                              -out=tfplan \
+                              -detailed-exitcode
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${env.TF_DIR}/tfplan", allowEmptyArchive: true
+                }
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo 'Terraform CI checks passed. PR is ready for review.'
+        }
+        failure {
+            echo 'Terraform CI checks failed. See logs for details.'
+        }
+    }
+}

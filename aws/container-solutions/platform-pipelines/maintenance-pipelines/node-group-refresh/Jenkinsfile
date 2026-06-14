@@ -1,0 +1,163 @@
+// =============================================================================
+// Pipeline: Node Group Refresh
+// Purpose:  Trigger rolling AMI refresh for a Managed Node Group
+// Trigger:  Manual (monthly patching cadence)
+// See:      docs/operations/node-patching-strategy.md
+// =============================================================================
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'terraform-agent'
+            defaultContainer 'terraform'
+        }
+    }
+
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'test', 'prod'],
+            description: 'Target environment'
+        )
+        string(
+            name: 'NODE_GROUP_NAME',
+            defaultValue: 'general',
+            description: 'Name of the node group to refresh'
+        )
+        string(
+            name: 'RELEASE_VERSION',
+            defaultValue: '',
+            description: 'EKS AMI release version (leave blank to use latest for current K8s version)'
+        )
+        booleanParam(
+            name: 'DRY_RUN',
+            defaultValue: true,
+            description: 'Check only — do not trigger refresh'
+        )
+    }
+
+    environment {
+        AWS_REGION   = 'eu-west-1'
+        CLUSTER_NAME = "eks-platform-${params.ENVIRONMENT}-eks"
+    }
+
+    stages {
+
+        stage('Pre-Refresh Health Check') {
+            steps {
+                withCredentials([...]) {
+                    sh """
+                        aws eks update-kubeconfig \
+                          --name ${env.CLUSTER_NAME} \
+                          --region ${env.AWS_REGION}
+
+                        echo "=== Node Status ==="
+                        kubectl get nodes
+
+                        echo "=== Pod Status (non-Running) ==="
+                        kubectl get pods --all-namespaces | grep -v Running | grep -v Completed || true
+
+                        echo "=== PodDisruptionBudgets ==="
+                        kubectl get pdb --all-namespaces
+                    """
+                }
+            }
+        }
+
+        stage('Resolve Target AMI Version') {
+            steps {
+                script {
+                    if (params.RELEASE_VERSION) {
+                        env.TARGET_RELEASE = params.RELEASE_VERSION
+                    } else {
+                        env.TARGET_RELEASE = sh(
+                            script: """
+                                aws ssm get-parameter \
+                                  --name /aws/service/eks/optimized-ami/1.30/amazon-linux-2/recommended/release_version \
+                                  --query Parameter.Value \
+                                  --output text \
+                                  --region ${env.AWS_REGION}
+                            """,
+                            returnStdout: true
+                        ).trim()
+                    }
+                    echo "Target release version: ${env.TARGET_RELEASE}"
+                    currentBuild.description = "Env: ${params.ENVIRONMENT} | AMI: ${env.TARGET_RELEASE}"
+                }
+            }
+        }
+
+        stage('Approval') {
+            when {
+                allOf {
+                    expression { !params.DRY_RUN }
+                    expression { params.ENVIRONMENT == 'prod' }
+                }
+            }
+            steps {
+                input(
+                    message: "Approve node group refresh for ${params.NODE_GROUP_NAME} in PRODUCTION (AMI: ${env.TARGET_RELEASE})?",
+                    submitter: 'platform-leads'
+                )
+            }
+        }
+
+        stage('Trigger Node Group Refresh') {
+            when {
+                expression { !params.DRY_RUN }
+            }
+            steps {
+                withCredentials([...]) {
+                    sh """
+                        aws eks update-nodegroup-version \
+                          --cluster-name ${env.CLUSTER_NAME} \
+                          --nodegroup-name ${params.NODE_GROUP_NAME} \
+                          --release-version ${env.TARGET_RELEASE} \
+                          --region ${env.AWS_REGION}
+                    """
+                }
+            }
+        }
+
+        stage('Monitor Refresh Progress') {
+            when {
+                expression { !params.DRY_RUN }
+            }
+            steps {
+                withCredentials([...]) {
+                    sh """
+                        echo "Monitoring node group update — this may take several minutes per node..."
+                        # Poll until update status is Successful
+                        # TODO: Implement polling loop with timeout
+                        kubectl get nodes -w &
+                        sleep 30
+                        kill %1 || true
+                    """
+                }
+            }
+        }
+
+        stage('Post-Refresh Validation') {
+            when {
+                expression { !params.DRY_RUN }
+            }
+            steps {
+                sh """
+                    kubectl get nodes
+                    kubectl get pods -n kube-system
+                    ./scripts/smoke-test.sh ${params.ENVIRONMENT}
+                """
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "Node group refresh completed for ${params.ENVIRONMENT}/${params.NODE_GROUP_NAME}."
+        }
+        failure {
+            echo "Node group refresh failed. Check kubectl get nodes and pod status."
+        }
+    }
+}

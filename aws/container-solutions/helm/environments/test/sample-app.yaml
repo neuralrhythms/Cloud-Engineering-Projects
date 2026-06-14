@@ -1,0 +1,26 @@
+# Test environment overrides for sample-app
+
+replicaCount: 2
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+ingress:
+  enabled: true
+  hosts:
+    - host: sample-app.test.internal
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

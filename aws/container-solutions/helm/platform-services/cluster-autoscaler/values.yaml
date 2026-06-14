@@ -1,0 +1,44 @@
+# Cluster Autoscaler — Helm values
+# Chart: autoscaler/cluster-autoscaler
+# IMPORTANT: image.tag must match the EKS cluster Kubernetes version
+
+autoDiscovery:
+  clusterName: "REPLACE_WITH_CLUSTER_NAME"
+
+awsRegion: "eu-west-1"
+
+rbac:
+  create: true
+  serviceAccount:
+    create: true
+    name: cluster-autoscaler
+    annotations:
+      eks.amazonaws.com/role-arn: "REPLACE_WITH_CLUSTER_AUTOSCALER_ROLE_ARN"
+
+# -- Must match EKS cluster Kubernetes version (e.g. v1.30.x for EKS 1.30)
+image:
+  tag: "v1.30.0"
+
+extraArgs:
+  # Scale down delay after a node was added
+  scale-down-delay-after-add: "10m"
+  # Scale down when node utilisation is below this threshold
+  scale-down-utilization-threshold: "0.5"
+  # Do not remove nodes with system pods
+  skip-nodes-with-system-pods: "true"
+  # Balance node groups of similar size
+  balance-similar-node-groups: "true"
+  # Expander strategy: least-waste, random, most-pods
+  expander: "least-waste"
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 600Mi
+  requests:
+    cpu: 100m
+    memory: 600Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534

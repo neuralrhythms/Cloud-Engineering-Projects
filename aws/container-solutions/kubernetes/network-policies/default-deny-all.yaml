@@ -1,0 +1,17 @@
+# Default deny-all NetworkPolicy
+# Apply to every application namespace as the baseline.
+# Then add explicit allow policies for required traffic.
+#
+# Usage: Apply to each application namespace
+#   kubectl apply -f default-deny-all.yaml -n {namespace}
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  # namespace: set at apply time
+spec:
+  podSelector: {}  # Applies to all pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress

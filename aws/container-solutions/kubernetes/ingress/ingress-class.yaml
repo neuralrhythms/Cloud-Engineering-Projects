@@ -1,0 +1,13 @@
+# IngressClass for AWS ALB
+# Required when using the AWS Load Balancer Controller with Kubernetes 1.18+
+# Replaces the kubernetes.io/ingress.class annotation approach.
+
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+  annotations:
+    # Mark as the default IngressClass for the cluster (optional)
+    # ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: ingress.k8s.aws/alb

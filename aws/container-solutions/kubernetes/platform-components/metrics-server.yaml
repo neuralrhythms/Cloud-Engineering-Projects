@@ -1,0 +1,19 @@
+# Metrics Server deployment note
+#
+# Metrics Server is deployed via Helm, not raw manifests.
+# This file documents the deployment command and configuration reference.
+#
+# Deployment:
+#   helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+#   helm upgrade --install metrics-server metrics-server/metrics-server \
+#     --namespace kube-system \
+#     --set args[0]="--kubelet-insecure-tls"
+#
+# After deployment, verify:
+#   kubectl top nodes
+#   kubectl top pods --all-namespaces
+#
+# HPA requires Metrics Server to be running to scale on CPU/memory.
+#
+# For EKS, the amazon-cloudwatch-observability managed add-on also
+# provides metrics — Metrics Server is still needed specifically for HPA.

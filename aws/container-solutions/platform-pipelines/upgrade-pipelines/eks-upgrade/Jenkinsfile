@@ -1,0 +1,123 @@
+// =============================================================================
+// Pipeline: EKS Upgrade
+// Purpose:  Upgrade EKS cluster version, add-ons, and node groups
+// Trigger:  Manual (parameterised)
+// See:      docs/operations/eks-upgrade-strategy.md
+// =============================================================================
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'terraform-agent'
+            defaultContainer 'terraform'
+        }
+    }
+
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'prod'], description: 'Target environment')
+        string(name: 'TARGET_VERSION', defaultValue: '1.30', description: 'Target Kubernetes version (e.g. 1.30)')
+        booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Validate only — do not upgrade')
+    }
+
+    stages {
+
+        stage('Pre-Upgrade Health Check') {
+            steps {
+                echo "Checking cluster health before upgrade..."
+                // TODO: kubectl get nodes, kubectl get pods --all-namespaces | grep -v Running
+            }
+        }
+
+        stage('API Deprecation Scan') {
+            steps {
+                echo "Scanning for deprecated Kubernetes APIs..."
+                // TODO: pluto detect-all-in-cluster
+                // TODO: pluto detect-helm -owide
+            }
+        }
+
+        stage('Plan Control Plane Upgrade') {
+            steps {
+                dir("terraform/environments/${params.ENVIRONMENT}") {
+                    sh """
+                        terraform init -backend-config=backend.hcl
+                        terraform plan \
+                          -var="kubernetes_version=${params.TARGET_VERSION}" \
+                          -var-file=terraform.tfvars \
+                          -out=upgrade-plan
+                    """
+                }
+            }
+        }
+
+        stage('Approval') {
+            when {
+                expression { !params.DRY_RUN }
+            }
+            steps {
+                input(
+                    message: "Approve EKS upgrade to ${params.TARGET_VERSION} in ${params.ENVIRONMENT}?",
+                    submitter: 'platform-leads'
+                )
+            }
+        }
+
+        stage('Upgrade Control Plane') {
+            when { expression { !params.DRY_RUN } }
+            steps {
+                dir("terraform/environments/${params.ENVIRONMENT}") {
+                    sh 'terraform apply upgrade-plan'
+                }
+                echo "Waiting for control plane upgrade to complete..."
+                // TODO: Poll aws eks describe-cluster until status = ACTIVE
+            }
+        }
+
+        stage('Update Managed Add-ons') {
+            when { expression { !params.DRY_RUN } }
+            steps {
+                echo "Updating EKS managed add-ons to versions compatible with ${params.TARGET_VERSION}..."
+                // TODO: terraform apply with updated addon_version values
+            }
+        }
+
+        stage('Update Node Groups') {
+            when { expression { !params.DRY_RUN } }
+            steps {
+                echo "Initiating rolling node group update..."
+                // TODO: aws eks update-nodegroup-version for each node group
+                // TODO: Poll until update is Complete
+            }
+        }
+
+        stage('Update Platform Helm Charts') {
+            when { expression { !params.DRY_RUN } }
+            steps {
+                echo "Updating cluster-autoscaler and ALB controller Helm charts..."
+                // TODO: helm upgrade cluster-autoscaler
+                // TODO: helm upgrade aws-load-balancer-controller
+            }
+        }
+
+        stage('Post-Upgrade Validation') {
+            steps {
+                sh '''
+                    kubectl get nodes
+                    kubectl get pods -n kube-system
+                    kubectl get pods -n platform-system
+                '''
+                // TODO: Run smoke test script
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "EKS upgrade to ${params.TARGET_VERSION} completed successfully in ${params.ENVIRONMENT}."
+        }
+        failure {
+            echo "EKS upgrade failed. Review logs. Manual intervention may be required."
+        }
+    }
+}
